@@ -36,6 +36,7 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
 <script src="config.js"></script>
 <script>
 (() => {
+  if (window.top !== window.self) { document.body.innerHTML = ''; return; } // never inside another site's frame (meta CSP cannot forbid it)
   // Login gate. The application itself is downloaded from a private bucket only after a password AND a second step
   // (authenticator app) were checked by the server; nothing of the system is in this public page.
   const C = window.MB_CONFIG;
