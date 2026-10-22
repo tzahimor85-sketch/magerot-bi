@@ -101,6 +101,8 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
 
   async function next() {
     const { data: { session } } = await sb.auth.getSession();
+    if (!session && /error_code=/.test(location.hash)) { history.replaceState(null, '', location.pathname);
+      return loginView(['bad', 'הקישור מהמייל כבר לא בתוקף. נכנסים עם המייל והסיסמה שקיבלת, או לוחצים "שכחתי סיסמה" לקבלת קישור חדש.']); }
     if (!session) return loginView();
     const user = session.user, type = (location.hash.match(/type=(\w+)/) || [])[1];
     if (type === 'recovery' || type === 'invite') { history.replaceState(null, '', location.pathname); return newPasswordView(type === 'invite' ? 'ברוך הבא. בוחרים סיסמה לכניסה.' : 'בוחרים סיסמה חדשה.'); }
