@@ -1,0 +1,1 @@
+window.MB_CONFIG = {"url": "https://nhmvleccuayhxxplpzuh.supabase.co", "anon": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5obXZsZWNjdWF5aHh4cGxwenVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2NTQ5NTcsImV4cCI6MjEwODIzMDk1N30.qFHh6W1vHFPkfqUyqQn5ym0m03KoE6rDy-89O5q4YAU"};

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'">
+<meta name="referrer" content="no-referrer">
+<title>מגרות BI · כניסה</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap">
+<style>
+:root { --ink: #152230; --mute: #66768a; --line: #e3e8ef; --amber: #e9a23b; --pos: #1d8a57; --neg: #cf4338; --bg: #f6f8fb }
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Rubik", "Segoe UI", Arial, sans-serif; font-size: 15px }
+#gate { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px }
+.card { width: 100%; max-width: 420px; background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 26px; box-shadow: 0 8px 28px rgba(21, 34, 48, .10); display: flex; flex-direction: column; gap: 14px }
+.logo { font-weight: 700; color: #9a6212; font-size: 14px } h1 { margin: 0; font-size: 22px } p { margin: 0; color: var(--mute); font-size: 13.5px; line-height: 1.55 }
+label { font-size: 13px; font-weight: 600; display: flex; flex-direction: column; gap: 6px }
+input { font: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; direction: ltr; text-align: left }
+input.code { font-family: Consolas, monospace; font-size: 26px; letter-spacing: 8px; text-align: center }
+button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 16px; background: var(--ink); color: #fff; cursor: pointer }
+button.link { background: transparent; color: #1f7686; padding: 0; font-weight: 500; text-align: start }
+button[disabled] { opacity: .5; cursor: default }
+.msg { font-size: 13px; border-radius: 10px; padding: 9px 11px } .msg.bad { background: rgba(207, 67, 56, .09); color: var(--neg) } .msg.ok { background: rgba(29, 138, 87, .1); color: var(--pos) }
+.qr { display: flex; justify-content: center } .qr img { width: 190px; height: 190px }
+.secret { font-family: Consolas, monospace; font-size: 12px; direction: ltr; text-align: center; color: var(--mute); word-break: break-all }
+ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px; line-height: 1.7 }
+.foot { font-size: 11.5px; color: var(--mute); text-align: center }
+[hidden] { display: none !important }
+</style>
+</head>
+<body>
+<div id="gate"><div class="card" id="card"><div class="logo">מגרות BI</div><h1>טוען…</h1></div></div>
+<div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" integrity="sha384-GFr3yTh5lJznCbZfpTtXnwboFsxqtTQoeTZCRHhE0579KrRmlCzen5AA8ohaB5ug" crossorigin="anonymous"></script>
+<script src="config.js"></script>
+<script>
+(() => {
+  // Login gate. The application itself is downloaded from a private bucket only after a password AND a second step
+  // (authenticator app) were checked by the server; nothing of the system is in this public page.
+  const C = window.MB_CONFIG;
+  const sb = supabase.createClient(C.url, C.anon, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  const card = document.getElementById('card');
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const view = (title, body, msg) => { card.innerHTML = `<div class="logo">מגרות BI</div><h1>${title}</h1>${body}${msg ? `<div class="msg ${msg[0]}" role="alert">${esc(msg[1])}</div>` : ''}<div class="foot">החיבור מוצפן. הכניסה מחייבת סיסמה ואימות בטלפון.</div>`; const f = card.querySelector('input'); if (f) f.focus(); };
+  const val = id => (document.getElementById(id) || {}).value || '';
+  const on = (id, fn) => { const b = document.getElementById(id); if (b) b.onclick = fn; };
+  const enter = (id, fn) => { const i = document.getElementById(id); if (i) i.addEventListener('keydown', e => { if (e.key === 'Enter') fn(); }); };
+  const audit = (action, detail) => sb.from('audit_log').insert({ action, detail: detail || null }).then(() => {}, () => {});
+  const strong = p => p.length >= 12 && /[a-z]/.test(p) && /[A-Z]/.test(p) && /\d/.test(p);
+  let fails = 0;
+
+  function loginView(msg) {
+    view('כניסה', `<label>מייל<input id="em" type="email" autocomplete="username" inputmode="email"></label><label>סיסמה<input id="pw" type="password" autocomplete="current-password"></label><button id="go">כניסה</button><button class="link" id="forgot">שכחתי סיסמה</button>`, msg);
+    const go = async () => { const b = document.getElementById('go'); b.disabled = true;
+      const { error } = await sb.auth.signInWithPassword({ email: val('em').trim(), password: val('pw') });
+      if (error) { fails++; await new Promise(r => setTimeout(r, Math.min(15000, 700 * 2 ** fails))); return loginView(['bad', 'המייל או הסיסמה לא נכונים.']); }
+      fails = 0; next(); };
+    on('go', go); enter('pw', go);
+    on('forgot', async () => { const em = val('em').trim(); if (!em) return loginView(['bad', 'כותבים קודם את המייל, ואז לוחצים "שכחתי סיסמה".']);
+      await sb.auth.resetPasswordForEmail(em, { redirectTo: location.origin + location.pathname });
+      loginView(['ok', 'אם המייל רשום במערכת, נשלח אליו קישור לבחירת סיסמה חדשה.']); });
+  }
+
+  function newPasswordView(reason, msg) {
+    view('בחירת סיסמה חדשה', `<p>${reason}</p><ol><li>לפחות 12 תווים</li><li>אות גדולה, אות קטנה ומספר</li></ol><label>סיסמה חדשה<input id="p1" type="password" autocomplete="new-password"></label><label>שוב, לאימות<input id="p2" type="password" autocomplete="new-password"></label><button id="go">שמירה</button>`, msg);
+    const go = async () => { const a = val('p1'), b = val('p2');
+      if (a !== b) return newPasswordView(reason, ['bad', 'שתי הסיסמאות לא זהות.']);
+      if (!strong(a)) return newPasswordView(reason, ['bad', 'הסיסמה חלשה מדי: צריך לפחות 12 תווים, אות גדולה, אות קטנה ומספר.']);
+      const { error } = await sb.auth.updateUser({ password: a, data: { must_change: false } });
+      if (error) return newPasswordView(reason, ['bad', 'לא הצלחתי לשמור: ' + error.message]);
+      audit('password_changed'); next(); };
+    on('go', go); enter('p2', go);
+  }
+
+  async function enrollView(msg) {
+    const { data: f } = await sb.auth.mfa.listFactors();
+    (f && f.all || []).filter(x => x.status !== 'verified').forEach(x => sb.auth.mfa.unenroll({ factorId: x.id }));
+    const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'מגרות BI ' + new Date().toISOString().slice(0, 10) });
+    if (error) return view('שגיאה', `<p>${esc(error.message)}</p>`);
+    view('אימות בטלפון (פעם אחת)', `<ol><li>מתקינים בטלפון Google Authenticator או Microsoft Authenticator.</li><li>באפליקציה לוחצים + וסורקים את הקוד.</li><li>מקלידים כאן את 6 הספרות שהאפליקציה מראה.</li></ol>
+      <div class="qr"><img alt="קוד לסריקה" src="${data.totp.qr_code}"></div><div class="secret">אם אי אפשר לסרוק, מקלידים באפליקציה: ${esc(data.totp.secret)}</div>
+      <label>הקוד מהאפליקציה<input id="code" class="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label><button id="go">אישור</button>`, msg);
+    const go = async () => { const { error: e } = await sb.auth.mfa.challengeAndVerify({ factorId: data.id, code: val('code').trim() });
+      if (e) return enrollView(['bad', 'הקוד לא נכון. בודקים שהשעון בטלפון מדויק ומקלידים את הקוד שמופיע עכשיו.']);
+      audit('mfa_enrolled'); next(); };
+    on('go', go); enter('code', go);
+  }
+
+  async function verifyView(msg) {
+    view('קוד מהטלפון', `<p>פותחים את אפליקציית האימות ומקלידים את 6 הספרות של מגרות BI.</p><label>קוד<input id="code" class="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label><button id="go">כניסה</button><button class="link" id="out">יציאה</button>`, msg);
+    const go = async () => { const { data: f } = await sb.auth.mfa.listFactors(); const t = (f.totp || [])[0];
+      const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: t.id, code: val('code').trim() });
+      if (error) { fails++; await new Promise(r => setTimeout(r, Math.min(15000, 700 * 2 ** fails))); return verifyView(['bad', 'הקוד לא נכון.']); }
+      fails = 0; next(); };
+    on('go', go); enter('code', go); on('out', logout);
+  }
+
+  async function logout() { await audit('logout'); await sb.auth.signOut(); sessionStorage.clear(); location.replace(location.pathname); }
+
+  async function next() {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) return loginView();
+    const user = session.user, type = (location.hash.match(/type=(\w+)/) || [])[1];
+    if (type === 'recovery' || type === 'invite') { history.replaceState(null, '', location.pathname); return newPasswordView(type === 'invite' ? 'ברוך הבא. בוחרים סיסמה לכניסה.' : 'בוחרים סיסמה חדשה.'); }
+    if (user.user_metadata && user.user_metadata.must_change) return newPasswordView('זו הכניסה הראשונה. מחליפים את הסיסמה שקיבלת בסיסמה שרק אתה יודע.');
+    const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal.nextLevel !== 'aal2') return enrollView();
+    if (aal.currentLevel !== 'aal2') return verifyView();
+    // signed in with two steps: the companies of this user, then the application itself
+    view('טוען את הנתונים…', '<p>זה לוקח כמה שניות.</p>');
+    const { data: ms, error } = await sb.from('memberships').select('role, tenant_id, tenants(id, name, vat, mask_personal)').eq('user_id', user.id);
+    if (error) return view('שגיאה', `<p>${esc(error.message)}</p>`);
+    if (!ms.length) return view('אין לך עדיין גישה לחברה', '<p>צריך לבקש ממנהל המערכת לצרף אותך לחברה.</p><button id="out">יציאה</button>'), on('out', logout);
+    const { data: app, error: e2 } = await sb.storage.from('app').download('app.js');
+    if (e2) return view('שגיאה בטעינה', `<p>${esc(e2.message)}</p>`);
+    audit('login', { companies: ms.length });
+    window.MB_REMOTE = { sb, user: { id: user.id, email: user.email, admin: (user.app_metadata || {}).role === 'admin' }, tenants: ms.map(m => ({ id: m.tenants.id, name: m.tenants.name, vat: m.tenants.vat, mask: m.tenants.mask_personal, role: m.role })), logout, audit };
+    document.getElementById('gate').remove();
+    const s = document.createElement('script'); s.src = URL.createObjectURL(new Blob([await app.text()], { type: 'text/javascript' })); document.body.appendChild(s);
+  }
+
+  next();
+})();
+</script>
+</body>
+</html>
