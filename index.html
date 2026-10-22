@@ -77,7 +77,8 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
   async function enrollView(msg) {
     const { data: f } = await sb.auth.mfa.listFactors();
     for (const x of (f && f.all || []).filter(x => x.status !== 'verified')) await sb.auth.mfa.unenroll({ factorId: x.id }); // a half-finished setup from an earlier try
-    const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', issuer: 'מגרות BI', friendlyName: 'מגרות BI ' + new Date().toISOString().slice(0, 16).replace('T', ' ') + ' ' + Math.random().toString(36).slice(2, 6) });
+    const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', issuer: 'Magerot BI', friendlyName: 'Magerot BI ' + // ASCII only: Microsoft Authenticator rejects a QR with Hebrew in it
+ new Date().toISOString().slice(0, 16).replace('T', ' ') + ' ' + Math.random().toString(36).slice(2, 6) });
     if (error) return view('שגיאה', `<p>${esc(error.message)}</p>`);
     view('אימות בטלפון (פעם אחת)', `<ol><li>מתקינים בטלפון Google Authenticator או Microsoft Authenticator.</li><li>באפליקציה לוחצים + וסורקים את הקוד.</li><li>מקלידים כאן את 6 הספרות שהאפליקציה מראה.</li></ol>
       <div class="qr"><img alt="קוד לסריקה" src="${data.totp.qr_code}"></div><div class="secret">אם אי אפשר לסרוק, מקלידים באפליקציה: ${esc(data.totp.secret)}</div>
