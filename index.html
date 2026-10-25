@@ -175,8 +175,8 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
       return;
     } else if (WORK) history.replaceState(null, '', location.pathname);
     if (isAdmin && !AS) {   // the admin's own tab: the clients' companies for the picker, and a fresh login for the tabs it opens
-      const { data: ct } = await sb.from('tenants').select('id, name').order('name');
-      window.__mbClientTenants = ct || [];
+      const { data: ct } = await sb.from('tenants').select('id, name, accounts!tenants_account_id_fkey(name)').order('name');
+      window.__mbClientTenants = (ct || []).map(t => ({ id: t.id, name: t.name, client: t.accounts ? t.accounts.name : '' }));
       window.addEventListener('message', async e => {
         if (e.origin !== location.origin || !e.data || e.data.t !== 'mb-session-req' || !(window.__mbOpened && window.__mbOpened.has(e.source))) return;
         const { data: { session } } = await sb.auth.getSession();
