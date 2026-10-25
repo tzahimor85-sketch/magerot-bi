@@ -174,6 +174,15 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
       const s = document.createElement('script'); s.src = URL.createObjectURL(new Blob([await wapp.text()], { type: 'text/javascript' })); document.body.appendChild(s);
       return;
     } else if (WORK) history.replaceState(null, '', location.pathname);
+    if (isAdmin && !AS) {   // the admin's own tab: the clients' companies for the picker, and a fresh login for the tabs it opens
+      const { data: ct } = await sb.from('tenants').select('id, name').order('name');
+      window.__mbClientTenants = ct || [];
+      window.addEventListener('message', async e => {
+        if (e.origin !== location.origin || !e.data || e.data.t !== 'mb-session-req' || !(window.__mbOpened && window.__mbOpened.has(e.source))) return;
+        const { data: { session } } = await sb.auth.getSession();
+        if (session) e.source.postMessage({ t: 'mb-session', access_token: session.access_token, refresh_token: session.refresh_token }, location.origin);
+      });
+    }
     let target = null;   // "view as": the admin sees the system through another user's permissions, read only
     if (AS && isAdmin) {
       try { target = JSON.parse(sessionStorage.getItem('mb-viewas') || 'null'); } catch (e) { target = null; }
@@ -202,7 +211,7 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
     window.MB_REMOTE = { sb, user: target ? { id: target.id, email: target.email, admin: false } : { id: user.id, email: user.email, admin: isAdmin },
       viewAs: target ? { id: target.id, email: target.email, name: target.name || target.email, by: user.id } : null,
       tenants: ms.map(m => ({ id: m.tenants.id, name: m.tenants.name, vat: m.tenants.vat, mask: m.tenants.mask_personal, role: m.role })), accounts,
-      logout: target ? closeTab : logout, audit };
+      logout: target ? closeTab : logout, audit, clientTenants: target ? [] : (window.__mbClientTenants || []) };
     document.getElementById('gate').remove();
     const s = document.createElement('script'); s.src = URL.createObjectURL(new Blob([await app.text()], { type: 'text/javascript' })); document.body.appendChild(s);
   }
