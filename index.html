@@ -43,7 +43,9 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
   // "view as" tab (?as=<user id>, opened by the back office): it never renews the login itself, since two tabs renewing the same
   // login make the server revoke it; it asks the back-office tab that opened it for a fresh one instead (see viewAsSession below)
   const AS = new URLSearchParams(location.search).get('as');
-  const sb = supabase.createClient(C.url, C.anon, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: !AS, detectSessionInUrl: !AS } });
+  // work: the admin uploads and checks the data of a client's company, in a tab opened from the back office (login handed over like "view as")
+  const WORK = new URLSearchParams(location.search).get('work');
+  const sb = supabase.createClient(C.url, C.anon, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: !AS && !WORK, detectSessionInUrl: !AS && !WORK } });
   const card = document.getElementById('card');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const view = (title, body, msg) => { card.innerHTML = `<div class="logo">מגרות BI</div><h1>${title}</h1>${body}${msg ? `<div class="msg ${msg[0]}" role="alert">${esc(msg[1])}</div>` : ''}<div class="foot">החיבור מוצפן. הכניסה מחייבת סיסמה ואימות בטלפון.</div>`; const f = card.querySelector('input'); if (f) f.focus(); };
@@ -158,6 +160,20 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
       const s = document.createElement('script'); s.src = URL.createObjectURL(new Blob([await bo.text()], { type: 'text/javascript' })); document.body.appendChild(s);
       return;
     }
+    if (WORK && isAdmin) {   // the admin works on one client's company: full rights there, every change under the admin's name
+      viewAsSession();
+      const { data: t, error: et } = await sb.from('tenants').select('id, name, vat, mask_personal').eq('id', WORK).maybeSingle();
+      if (et || !t) return view('החברה לא נמצאה', '<p>פותחים את העבודה על חברה מתוך הבק אופיס, בכרטיס הלקוח.</p>');
+      const { data: wapp, error: ew } = await sb.storage.from('app').download('app.js');
+      if (ew) return view('שגיאה בטעינה', `<p>${esc(ew.message)}</p>`);
+      audit('admin_work', { tenant: t.id, name: t.name });
+      window.MB_REMOTE = { sb, user: { id: user.id, email: user.email, admin: true }, work: { id: t.id, name: t.name },
+        tenants: [{ id: t.id, name: t.name, vat: t.vat, mask: t.mask_personal, role: 'owner' }], accounts: [],
+        logout: () => { window.close(); view('העבודה הסתיימה', '<p>אפשר לסגור את הלשונית הזו.</p>'); }, audit };
+      document.getElementById('gate').remove();
+      const s = document.createElement('script'); s.src = URL.createObjectURL(new Blob([await wapp.text()], { type: 'text/javascript' })); document.body.appendChild(s);
+      return;
+    } else if (WORK) history.replaceState(null, '', location.pathname);
     let target = null;   // "view as": the admin sees the system through another user's permissions, read only
     if (AS && isAdmin) {
       try { target = JSON.parse(sessionStorage.getItem('mb-viewas') || 'null'); } catch (e) { target = null; }
