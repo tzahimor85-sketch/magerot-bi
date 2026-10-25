@@ -40,7 +40,10 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
   // Login gate. The application itself is downloaded from a private bucket only after a password AND a second step
   // (authenticator app) were checked by the server; nothing of the system is in this public page.
   const C = window.MB_CONFIG;
-  const sb = supabase.createClient(C.url, C.anon, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  // "view as" tab (?as=<user id>, opened by the back office): it never renews the login itself, since two tabs renewing the same
+  // login make the server revoke it; it asks the back-office tab that opened it for a fresh one instead (see viewAsSession below)
+  const AS = new URLSearchParams(location.search).get('as');
+  const sb = supabase.createClient(C.url, C.anon, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: !AS, detectSessionInUrl: !AS } });
   const card = document.getElementById('card');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const view = (title, body, msg) => { card.innerHTML = `<div class="logo">מגרות BI</div><h1>${title}</h1>${body}${msg ? `<div class="msg ${msg[0]}" role="alert">${esc(msg[1])}</div>` : ''}<div class="foot">החיבור מוצפן. הכניסה מחייבת סיסמה ואימות בטלפון.</div>`; const f = card.querySelector('input'); if (f) f.focus(); };
@@ -100,6 +103,21 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
 
   async function logout() { await audit('logout'); await sb.auth.signOut(); sessionStorage.clear(); location.replace(location.pathname); }
 
+  // a "view as" tab takes a fresh login from the back-office tab that opened it, a little before its own expires
+  function viewAsSession() {
+    window.addEventListener('message', async e => {
+      if (e.origin !== location.origin || e.source !== window.opener || !e.data || e.data.t !== 'mb-session') return;
+      await sb.auth.setSession({ access_token: e.data.access_token, refresh_token: e.data.refresh_token });
+    });
+    const ask = async () => {
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session || session.expires_at * 1000 - Date.now() > 180e3) return;
+      if (window.opener && !window.opener.closed) window.opener.postMessage({ t: 'mb-session-req' }, location.origin);
+      else if (session.expires_at * 1000 < Date.now()) document.body.innerHTML = '<p style="padding:40px;font-family:Rubik,Arial">התצוגה פגה, כי לשונית הבק אופיס נסגרה. פותחים אותה שוב מהבק אופיס.</p>';
+    };
+    setInterval(ask, 30e3); window.__mbAskSession = ask;
+  }
+
   async function next() {
     const { data: { session } } = await sb.auth.getSession();
     if (!session && /error_code=/.test(location.hash)) { history.replaceState(null, '', location.pathname);
@@ -123,16 +141,27 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
       const s = document.createElement('script'); s.src = URL.createObjectURL(new Blob([await bo.text()], { type: 'text/javascript' })); document.body.appendChild(s);
       return;
     }
-    const { data: ms, error } = await sb.from('memberships').select('role, tenant_id, tenants(id, name, vat, mask_personal)').eq('user_id', user.id);
+    let target = null;   // "view as": the admin sees the system through another user's permissions, read only
+    if (AS && isAdmin) {
+      try { target = JSON.parse(sessionStorage.getItem('mb-viewas') || 'null'); } catch (e) { target = null; }
+      if (!target || target.id !== AS) return view('לא ניתן להציג', '<p>פותחים את התצוגה מתוך הבק אופיס, בכפתור "צפה בעיניו".</p>');
+      viewAsSession();
+    } else if (AS) history.replaceState(null, '', location.pathname);
+    const uid = target ? target.id : user.id;
+    const { data: ms, error } = await sb.from('memberships').select('role, tenant_id, tenants(id, name, vat, mask_personal)').eq('user_id', uid);
     if (error) return view('שגיאה', `<p>${esc(error.message)}</p>`);
     // the business accounts of this user: a firm's people, or a private business (messages, the firm's screens)
-    const { data: am } = await sb.from('account_members').select('role, account_id, accounts(id, name, kind)').eq('user_id', user.id);
+    const { data: am } = await sb.from('account_members').select('role, account_id, accounts(id, name, kind)').eq('user_id', uid);
     const accounts = (am || []).filter(x => x.accounts).map(x => ({ id: x.accounts.id, name: x.accounts.name, kind: x.accounts.kind, role: x.role }));
     if (!ms.length && !accounts.length) return view('אין לך עדיין גישה לחברה', '<p>צריך לבקש ממנהל המערכת לצרף אותך לחברה.</p><button id="out">יציאה</button>'), on('out', logout);
     const { data: app, error: e2 } = await sb.storage.from('app').download('app.js');
     if (e2) return view('שגיאה בטעינה', `<p>${esc(e2.message)}</p>`);
-    audit('login', { companies: ms.length });
-    window.MB_REMOTE = { sb, user: { id: user.id, email: user.email, admin: (user.app_metadata || {}).role === 'admin' }, tenants: ms.map(m => ({ id: m.tenants.id, name: m.tenants.name, vat: m.tenants.vat, mask: m.tenants.mask_personal, role: m.role })), accounts, logout, audit };
+    if (target) audit('view_as', { target: target.id, email: target.email }); else audit('login', { companies: ms.length });
+    const closeTab = () => { window.close(); view('התצוגה נסגרה', '<p>אפשר לסגור את הלשונית הזו.</p>'); };
+    window.MB_REMOTE = { sb, user: target ? { id: target.id, email: target.email, admin: false } : { id: user.id, email: user.email, admin: isAdmin },
+      viewAs: target ? { id: target.id, email: target.email, name: target.name || target.email, by: user.id } : null,
+      tenants: ms.map(m => ({ id: m.tenants.id, name: m.tenants.name, vat: m.tenants.vat, mask: m.tenants.mask_personal, role: m.role })), accounts,
+      logout: target ? closeTab : logout, audit };
     document.getElementById('gate').remove();
     const s = document.createElement('script'); s.src = URL.createObjectURL(new Blob([await app.text()], { type: 'text/javascript' })); document.body.appendChild(s);
   }
