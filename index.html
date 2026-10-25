@@ -103,6 +103,19 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
 
   async function logout() { await audit('logout'); await sb.auth.signOut(); sessionStorage.clear(); location.replace(location.pathname); }
 
+  // a "view as" tab cannot write: every write path of the client is replaced, so a future screen that forgets the check still cannot
+  // change anything (only the view_as/login lines of the access log are written)
+  function readOnlyClient() {
+    const refused = { data: null, error: { message: 'צפייה בלבד: אי אפשר לשנות בלשונית הזו' } };
+    const blocked = new Proxy(function () {}, { get: (t, p) => p === 'then' ? (res => res(refused)) : () => blocked, apply: () => blocked });
+    const from0 = sb.from.bind(sb);
+    sb.from = rel => { const q = from0(rel); if (rel === 'audit_log') return q; ['insert', 'update', 'upsert', 'delete'].forEach(k => { q[k] = () => blocked; }); return q; };
+    sb.rpc = () => blocked;
+    const st0 = sb.storage.from.bind(sb.storage);
+    sb.storage.from = bk => { const s = st0(bk); ['upload', 'update', 'remove', 'move', 'copy'].forEach(k => { s[k] = () => blocked; }); return s; };
+    sb.functions.invoke = () => blocked;
+  }
+
   // a "view as" tab takes a fresh login from the back-office tab that opened it, a little before its own expires
   function viewAsSession() {
     window.addEventListener('message', async e => {
@@ -151,8 +164,16 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
     const { data: ms, error } = await sb.from('memberships').select('role, tenant_id, tenants(id, name, vat, mask_personal)').eq('user_id', uid);
     if (error) return view('שגיאה', `<p>${esc(error.message)}</p>`);
     // the business accounts of this user: a firm's people, or a private business (messages, the firm's screens)
-    const { data: am } = await sb.from('account_members').select('role, account_id, accounts(id, name, kind)').eq('user_id', uid);
-    const accounts = (am || []).filter(x => x.accounts).map(x => ({ id: x.accounts.id, name: x.accounts.name, kind: x.accounts.kind, role: x.role }));
+    // members read only id/name/kind of their own accounts (my_accounts); the admin, viewing as someone, reads them directly
+    let accounts;
+    if (target) {
+      const { data: am } = await sb.from('account_members').select('role, account_id, accounts(id, name, kind)').eq('user_id', uid);
+      accounts = (am || []).filter(x => x.accounts).map(x => ({ id: x.accounts.id, name: x.accounts.name, kind: x.accounts.kind, role: x.role }));
+    } else {
+      const { data: am } = await sb.rpc('my_accounts');
+      accounts = (am || []).map(x => ({ id: x.id, name: x.name, kind: x.kind, role: x.role }));
+    }
+    if (target) readOnlyClient();
     if (!ms.length && !accounts.length) return view('אין לך עדיין גישה לחברה', '<p>צריך לבקש ממנהל המערכת לצרף אותך לחברה.</p><button id="out">יציאה</button>'), on('out', logout);
     const { data: app, error: e2 } = await sb.storage.from('app').download('app.js');
     if (e2) return view('שגיאה בטעינה', `<p>${esc(e2.message)}</p>`);
