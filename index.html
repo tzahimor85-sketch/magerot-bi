@@ -139,9 +139,13 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
     const user = session.user, type = (location.hash.match(/type=(\w+)/) || [])[1];
     if (type === 'recovery' || type === 'invite') { history.replaceState(null, '', location.pathname); return newPasswordView(type === 'invite' ? 'ברוך הבא. בוחרים סיסמה לכניסה.' : 'בוחרים סיסמה חדשה.'); }
     if (user.user_metadata && user.user_metadata.must_change) return newPasswordView('זו הכניסה הראשונה. מחליפים את הסיסמה שקיבלת בסיסמה שרק אתה יודע.');
-    const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (aal.nextLevel !== 'aal2') return enrollView();
-    if (aal.currentLevel !== 'aal2') return verifyView();
+    // password only: the admin allowed this person to sign in without the phone code (never a system admin; the server checks it too)
+    const am = user.app_metadata || {}, pwOnly = am.mfa === 'off' && am.role !== 'admin';
+    if (!pwOnly) {
+      const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (aal.nextLevel !== 'aal2') return enrollView();
+      if (aal.currentLevel !== 'aal2') return verifyView();
+    }
     // signed in with two steps: the companies of this user, then the application itself
     view('טוען את הנתונים…', '<p>זה לוקח כמה שניות.</p>');
     const isAdmin = (user.app_metadata || {}).role === 'admin';
