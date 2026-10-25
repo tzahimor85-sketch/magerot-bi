@@ -113,6 +113,16 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
     if (aal.currentLevel !== 'aal2') return verifyView();
     // signed in with two steps: the companies of this user, then the application itself
     view('טוען את הנתונים…', '<p>זה לוקח כמה שניות.</p>');
+    const isAdmin = (user.app_metadata || {}).role === 'admin';
+    if (isAdmin && /^#bo/.test(location.hash)) {   // the back office: its own code, given by the server to the admin only
+      const { data: bo, error: eb } = await sb.storage.from('app').download('admin.js');
+      if (eb) return view('שגיאה בטעינה', `<p>${esc(eb.message)}</p>`);
+      audit('login', { area: 'back_office' });
+      window.MB_REMOTE = { sb, user: { id: user.id, email: user.email, admin: true }, tenants: [], logout, audit };
+      document.getElementById('gate').remove();
+      const s = document.createElement('script'); s.src = URL.createObjectURL(new Blob([await bo.text()], { type: 'text/javascript' })); document.body.appendChild(s);
+      return;
+    }
     const { data: ms, error } = await sb.from('memberships').select('role, tenant_id, tenants(id, name, vat, mask_personal)').eq('user_id', user.id);
     if (error) return view('שגיאה', `<p>${esc(error.message)}</p>`);
     if (!ms.length) return view('אין לך עדיין גישה לחברה', '<p>צריך לבקש ממנהל המערכת לצרף אותך לחברה.</p><button id="out">יציאה</button>'), on('out', logout);
