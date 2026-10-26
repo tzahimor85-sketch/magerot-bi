@@ -45,7 +45,9 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
   const AS = new URLSearchParams(location.search).get('as');
   // work: the admin uploads and checks the data of a client's company, in a tab opened from the back office (login handed over like "view as")
   const WORK = new URLSearchParams(location.search).get('work');
-  const sb = supabase.createClient(C.url, C.anon, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: !AS && !WORK, detectSessionInUrl: !AS && !WORK } });
+  // such a tab that went back to the back office or the main screen ("חזרה לבק אופיס"): still a child tab, its login still comes from the tab that opened it
+  const CHILD = !!(AS || WORK || (window.opener && (() => { try { return sessionStorage.getItem('mb-child') === '1'; } catch (e) { return false; } })()));
+  const sb = supabase.createClient(C.url, C.anon, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: !CHILD, detectSessionInUrl: !CHILD } });
   const card = document.getElementById('card');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const view = (title, body, msg) => { card.innerHTML = `<div class="logo">מגרות BI</div><h1>${title}</h1>${body}${msg ? `<div class="msg ${msg[0]}" role="alert">${esc(msg[1])}</div>` : ''}<div class="foot">החיבור מוצפן. הכניסה מחייבת סיסמה ואימות בטלפון.</div>`; const f = card.querySelector('input'); if (f) f.focus(); };
@@ -151,6 +153,7 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
     // signed in with two steps: the companies of this user, then the application itself
     view('טוען את הנתונים…', '<p>זה לוקח כמה שניות.</p>');
     const isAdmin = (user.app_metadata || {}).role === 'admin';
+    if (CHILD && !AS && !WORK) viewAsSession();
     if (isAdmin && /^#bo/.test(location.hash)) {   // the back office: its own code, given by the server to the admin only
       const { data: bo, error: eb } = await sb.storage.from('app').download('admin.js');
       if (eb) return view('שגיאה בטעינה', `<p>${esc(eb.message)}</p>`);
@@ -162,12 +165,12 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
     }
     if (WORK && isAdmin) {   // the admin works on one client's company: full rights there, every change under the admin's name
       viewAsSession();
-      const { data: t, error: et } = await sb.from('tenants').select('id, name, vat, mask_personal').eq('id', WORK).maybeSingle();
+      const { data: t, error: et } = await sb.from('tenants').select('id, name, vat, mask_personal, account_id').eq('id', WORK).maybeSingle();
       if (et || !t) return view('החברה לא נמצאה', '<p>פותחים את העבודה על חברה מתוך הבק אופיס, בכרטיס הלקוח.</p>');
       const { data: wapp, error: ew } = await sb.storage.from('app').download('app.js');
       if (ew) return view('שגיאה בטעינה', `<p>${esc(ew.message)}</p>`);
       audit('admin_work', { tenant: t.id, name: t.name });
-      window.MB_REMOTE = { sb, user: { id: user.id, email: user.email, admin: true }, work: { id: t.id, name: t.name },
+      window.MB_REMOTE = { sb, user: { id: user.id, email: user.email, admin: true }, work: { id: t.id, name: t.name, account: t.account_id },
         tenants: [{ id: t.id, name: t.name, vat: t.vat, mask: t.mask_personal, role: 'owner' }], accounts: [],
         logout: () => { window.close(); view('העבודה הסתיימה', '<p>אפשר לסגור את הלשונית הזו.</p>'); }, audit };
       document.getElementById('gate').remove();
@@ -203,7 +206,8 @@ ol { margin: 0; padding-inline-start: 20px; color: var(--mute); font-size: 13px;
       accounts = (am || []).map(x => ({ id: x.id, name: x.name, kind: x.kind, role: x.role }));
     }
     if (target) readOnlyClient();
-    if (!ms.length && !accounts.length) return view('אין לך עדיין גישה לחברה', '<p>צריך לבקש ממנהל המערכת לצרף אותך לחברה.</p><button id="out">יציאה</button>'), on('out', logout);
+    // the admin always gets the main screen: the clients' companies to pick from and the way to the back office, even with no company of his own
+    if (!ms.length && !accounts.length && !(isAdmin && !target)) return view('אין לך עדיין גישה לחברה', '<p>צריך לבקש ממנהל המערכת לצרף אותך לחברה.</p><button id="out">יציאה</button>'), on('out', logout);
     const { data: app, error: e2 } = await sb.storage.from('app').download('app.js');
     if (e2) return view('שגיאה בטעינה', `<p>${esc(e2.message)}</p>`);
     if (target) audit('view_as', { target: target.id, email: target.email }); else audit('login', { companies: ms.length });
